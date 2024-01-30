@@ -30,6 +30,38 @@ class Channel():
             self._flow_rate = self.velocity()*self.cross_sectional_area()
         return self._flow_rate
 
+class RectangularChannel(Channel):
+    '''Class for rectangular channels'''
+
+    def __init__(self, depth, width, inclination, roughness_n):
+        super().__init__(inclination, roughness_n)
+        self.depth = depth
+        self.width = width
+        self._cross_sectional_area = None
+        self._wetted_circut = None
+
+    def cross_sectional_area(self):
+        if self._cross_sectional_area is None:
+            self._cross_sectional_area = self.width * self.depth
+        return self._cross_sectional_area
+
+    def wetted_circut(self):
+        if self._wetted_circut is None:
+            self._wetted_circut = 2 * self.depth + self.width
+        return self._wetted_circut
+
+    def calculate_flow_rates(self):
+        flow_rates = {}
+        for h in range(0, (self.depth*100) + 1, 10):
+            self.depth = h / 100.0
+            self._cross_sectional_area = None
+            self._wetted_circut = None
+            self._hydraulic_radius = None
+            self._velocity = None
+            self._flow_rate = None
+            flow_rates[self.depth] = round(self.flow_rate(), 2)
+        return flow_rates
+
 class TrapezoidalChannel(Channel):
     '''Class for trapezoidal channels'''
 
