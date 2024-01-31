@@ -36,6 +36,27 @@ class Channel():
             self._flow_rate = self.velocity()*self.cross_sectional_area()
         return self._flow_rate
 
+class Flat(Channel):
+    '''
+    Class for flat surfaces
+    '''
+    def __init__(self, depth, width, inclination, roughness_n):
+        super().__init__(inclination, roughness_n)
+        self.depth = depth
+        self.width = width
+        self._cross_sectional_area = None
+        self._wetted_perimeter = None
+
+    def cross_sectional_area(self):
+        if self._cross_sectional_area is None:
+            self._cross_sectional_area = self.depth * self.width
+        return self._cross_sectional_area
+    
+    def wetted_perimeter(self):
+        if self._wetted_perimeter is None:
+            self._wetted_perimeter = self.width
+        return self._wetted_perimeter
+
 class TriangularChannel(Channel):
     '''Class for triangular channels'''
 
@@ -183,3 +204,4 @@ class SemiCircularChannel(Channel):
         if self._wetted_perimeter is None:
             self._wetted_perimeter = self.radius * self.theta_rad()
         return self._wetted_perimeter
+            
