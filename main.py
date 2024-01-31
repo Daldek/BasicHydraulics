@@ -140,7 +140,7 @@ class TrapezoidalChannel(Channel):
 
     def cross_sectional_area(self):
         if self._cross_sectional_area is None:
-            self._cross_sectional_area = ((self.width+((2*(self.depth*self.bank_inclination_m))+self.width))/2.0)*self.depth
+            self._cross_sectional_area = ((self.depth*self.bank_inclination_m)+self.width)*self.depth
         return self._cross_sectional_area
 
     def wetted_perimeter(self):
@@ -148,9 +148,8 @@ class TrapezoidalChannel(Channel):
         https://en.wikipedia.org/wiki/Wetted_perimeter
         '''
         if self._wetted_perimeter is None:
-            xx = math.pow((self.bank_inclination_m*self.depth), 2)+math.pow(self.depth, 2)
-            x = math.sqrt(xx)
-            self._wetted_perimeter = (2*x)+self.width
+            self._wetted_perimeter = self.width + 2 * self.depth *\
+                  math.sqrt(1 + math.pow(self.bank_inclination_m, 2))
         return self._wetted_perimeter
     
     def calculate_flow_rates(self):
@@ -204,4 +203,3 @@ class SemiCircularChannel(Channel):
         if self._wetted_perimeter is None:
             self._wetted_perimeter = self.radius * self.theta_rad()
         return self._wetted_perimeter
-            
