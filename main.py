@@ -51,7 +51,7 @@ class RectangularChannel(Channel):
 
     def calculate_flow_rates(self):
         flow_rates = {}
-        for h in range(0, (self.depth*100) + 1, 10):
+        for h in range(0, int((self.depth*100) + 1), 10):
             self.depth = h / 100.0
             self._cross_sectional_area = None
             self._wetted_circut = None
@@ -86,7 +86,7 @@ class TrapezoidalChannel(Channel):
     
     def calculate_flow_rates(self):
         flow_rates = {}
-        for h in range(0, (self.depth*100) + 1, 10):
+        for h in range(0, int((self.depth*100) + 1), 10):
             self.depth = h / 100.0
             self._cross_sectional_area = None
             self._wetted_circut = None
