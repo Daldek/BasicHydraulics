@@ -1,4 +1,3 @@
-import matplotlib.pyplot as plt
 import math
 from fractions import Fraction
 
@@ -100,18 +99,25 @@ class TrapezoidalChannel(Channel):
 class SemiCircularChannel(Channel):
     '''Class for circular channels'''
 
-    def __init__(self, radius, inclination, roughness_n):
+    def __init__(self, depth, radius, inclination, roughness_n):
         super().__init__(inclination, roughness_n)
+        self.depth = depth
         self.radius = radius
+        self._theta_rad = None
         self._cross_sectional_area = None
         self._wetted_circut = None
 
+    def theta_rad(self):
+        if self._theta_rad is None:
+            self._theta_rad = 2 * math.acos((self.radius - self.depth)/self.radius)
+        return self._theta_rad
+
     def cross_sectional_area(self):
         if self._cross_sectional_area is None:
-            self._cross_sectional_area = math.pi * math.pow(self.radius, 2) * 0.5
+            self._cross_sectional_area = 0.5 * math.pow(self.radius, 2) * (self.theta_rad() - math.sin(self.theta_rad()))
         return self._cross_sectional_area
 
     def wetted_circut(self):
         if self._wetted_circut is None:
-            self._wetted_circut = math.pi * self.radius
-        return self._wetted_circut    
+            self._wetted_circut = self.radius * self.theta_rad()
+        return self._wetted_circut
