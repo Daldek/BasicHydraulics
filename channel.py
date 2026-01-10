@@ -339,9 +339,13 @@ class IrregularChannel(Channel):
     Supports discontinuous wet areas - when the cross-section has multiple
     independent wet segments, each segment's flow is calculated separately
     using its own hydraulic radius, then summed for total flow.
+
+    Optionally supports subdivision into Left Overbank (LOB), Main Channel,
+    and Right Overbank (ROB) with separate roughness coefficients for each.
     """
 
-    def __init__(self, stations, elevations, water_level, inclination, roughness_n):
+    def __init__(self, stations, elevations, water_level, inclination, roughness_n,
+                 lob_station=None, rob_station=None, lob_n=None, rob_n=None):
         """
         Initialize an IrregularChannel instance.
 
@@ -350,7 +354,11 @@ class IrregularChannel(Channel):
             elevations (list): List of elevations (y-coordinates) corresponding to stations
             water_level (float): Absolute elevation of water surface
             inclination (float): Channel bed slope
-            roughness_n (float): Manning's roughness coefficient
+            roughness_n (float): Manning's roughness coefficient for main channel
+            lob_station (float, optional): Station marking left overbank boundary
+            rob_station (float, optional): Station marking right overbank boundary
+            lob_n (float, optional): Manning's n for left overbank (defaults to roughness_n)
+            rob_n (float, optional): Manning's n for right overbank (defaults to roughness_n)
         """
         super().__init__(inclination, roughness_n)
         if len(stations) != len(elevations):
@@ -360,9 +368,14 @@ class IrregularChannel(Channel):
         self.stations = stations
         self.elevations = elevations
         self.water_level = water_level
+        self.lob_station = lob_station
+        self.rob_station = rob_station
+        self.lob_n = lob_n if lob_n is not None else roughness_n
+        self.rob_n = rob_n if rob_n is not None else roughness_n
         self._cross_sectional_area = None
         self._wetted_perimeter = None
         self._wet_segments = None
+        self._subsection_flows = None
 
     def _interpolate_station(self, s1, e1, s2, e2, water_level):
         """Interpolate station at water level between two points."""
@@ -440,24 +453,125 @@ class IrregularChannel(Channel):
             perimeter += math.sqrt((s2 - s1) ** 2 + (e2 - e1) ** 2)
         return perimeter
 
-    def _segment_flow(self, segment):
+    def _interpolate_elevation(self, s1, e1, s2, e2, target_station):
+        """Interpolate elevation at a given station between two points."""
+        if s1 == s2:
+            return e1
+        return e1 + (e2 - e1) * (target_station - s1) / (s2 - s1)
+
+    def _split_segment_by_boundaries(self, segment):
         """
-        Calculate flow rate for a single wet segment using Manning's equation.
-        Each segment has its own hydraulic radius.
+        Split a wet segment at LOB and ROB boundaries.
+
+        Returns:
+            list: List of (subsection_name, sub_segment) tuples
         """
-        area = self._segment_area(segment)
-        perimeter = self._segment_perimeter(segment)
+        if self.lob_station is None and self.rob_station is None:
+            return [('Channel', segment)]
+
+        # Collect all boundary stations that fall within this segment
+        seg_stations = [p[0] for p in segment]
+        seg_min, seg_max = min(seg_stations), max(seg_stations)
+
+        boundaries = []
+        if self.lob_station is not None and seg_min < self.lob_station < seg_max:
+            boundaries.append(self.lob_station)
+        if self.rob_station is not None and seg_min < self.rob_station < seg_max:
+            boundaries.append(self.rob_station)
+
+        if not boundaries:
+            # No boundaries within segment - assign based on center
+            center = (seg_min + seg_max) / 2
+            if self.lob_station is not None and center < self.lob_station:
+                return [('LOB', segment)]
+            elif self.rob_station is not None and center > self.rob_station:
+                return [('ROB', segment)]
+            else:
+                return [('Channel', segment)]
+
+        # Split segment at boundaries
+        boundaries = sorted(boundaries)
+        result = []
+        current_segment = []
+        boundary_idx = 0
+
+        for i, (s, e) in enumerate(segment):
+            # Check if we need to split before this point
+            while boundary_idx < len(boundaries) and boundaries[boundary_idx] <= s:
+                if current_segment:
+                    # Interpolate point at boundary
+                    if i > 0:
+                        s_prev, e_prev = segment[i - 1]
+                        e_at_boundary = self._interpolate_elevation(
+                            s_prev, e_prev, s, e, boundaries[boundary_idx])
+                        current_segment.append((boundaries[boundary_idx], e_at_boundary))
+
+                    # Determine subsection for current_segment
+                    seg_center = sum(p[0] for p in current_segment) / len(current_segment)
+                    subsection = self._get_subsection_by_station(seg_center)
+                    result.append((subsection, current_segment))
+
+                    # Start new segment from boundary
+                    current_segment = [(boundaries[boundary_idx], e_at_boundary)]
+
+                boundary_idx += 1
+
+            current_segment.append((s, e))
+
+        # Add final segment
+        if len(current_segment) >= 2:
+            seg_center = sum(p[0] for p in current_segment) / len(current_segment)
+            subsection = self._get_subsection_by_station(seg_center)
+            result.append((subsection, current_segment))
+
+        return result
+
+    def _get_subsection_by_station(self, station):
+        """Determine subsection based on station value."""
+        if self.lob_station is not None and station < self.lob_station:
+            return 'LOB'
+        elif self.rob_station is not None and station > self.rob_station:
+            return 'ROB'
+        else:
+            return 'Channel'
+
+    def _get_roughness_for_subsection(self, subsection):
+        """Get Manning's n for a subsection name."""
+        if subsection == 'LOB':
+            return self.lob_n
+        elif subsection == 'ROB':
+            return self.rob_n
+        else:
+            return self.roughness_n
+
+    def _subsegment_flow(self, subsegment, roughness_n):
+        """
+        Calculate flow rate for a subsegment using Manning's equation.
+        """
+        area = self._segment_area(subsegment)
+        perimeter = self._segment_perimeter(subsegment)
 
         if perimeter == 0 or area == 0:
             return 0.0
 
         hydraulic_radius = area / perimeter
         velocity = (
-            (1 / self.roughness_n)
+            (1 / roughness_n)
             * math.pow(hydraulic_radius, Fraction(2, 3))
             * math.pow(self.inclination, 0.5)
         )
         return velocity * area
+
+    def _segment_flow(self, segment):
+        """
+        Calculate flow rate for a wet segment, splitting by LOB/Channel/ROB boundaries.
+        """
+        subsegments = self._split_segment_by_boundaries(segment)
+        total_flow = 0.0
+        for subsection, subseg in subsegments:
+            n = self._get_roughness_for_subsection(subsection)
+            total_flow += self._subsegment_flow(subseg, n)
+        return total_flow
 
     def cross_sectional_area(self):
         """
@@ -489,39 +603,81 @@ class IrregularChannel(Channel):
 
     def get_segments_info(self):
         """
-        Get detailed information about each wet segment.
+        Get detailed information about each wet segment and its subsections.
 
         Returns:
-            list: List of dicts with area, perimeter, hydraulic_radius, and flow for each segment
+            list: List of dicts with area, perimeter, hydraulic_radius, flow,
+                  subsection, and roughness_n for each subsegment
         """
         segments = self._find_wet_segments()
         info = []
-        for i, seg in enumerate(segments):
-            area = self._segment_area(seg)
-            perimeter = self._segment_perimeter(seg)
-            if perimeter > 0:
-                r_h = area / perimeter
-                velocity = (
-                    (1 / self.roughness_n)
-                    * math.pow(r_h, Fraction(2, 3))
-                    * math.pow(self.inclination, 0.5)
-                )
-                flow = velocity * area
-            else:
-                r_h = 0
-                velocity = 0
-                flow = 0
+        idx = 1
 
-            info.append({
-                "segment": i + 1,
-                "points": seg,
-                "area": round(area, 4),
-                "perimeter": round(perimeter, 4),
-                "hydraulic_radius": round(r_h, 4),
-                "velocity": round(velocity, 4),
-                "flow": round(flow, 4),
-            })
+        for seg in segments:
+            subsegments = self._split_segment_by_boundaries(seg)
+            for subsection, subseg in subsegments:
+                area = self._segment_area(subseg)
+                perimeter = self._segment_perimeter(subseg)
+                n = self._get_roughness_for_subsection(subsection)
+
+                if perimeter > 0:
+                    r_h = area / perimeter
+                    velocity = (
+                        (1 / n)
+                        * math.pow(r_h, Fraction(2, 3))
+                        * math.pow(self.inclination, 0.5)
+                    )
+                    flow = velocity * area
+                else:
+                    r_h = 0
+                    velocity = 0
+                    flow = 0
+
+                info.append({
+                    "segment": idx,
+                    "subsection": subsection,
+                    "roughness_n": n,
+                    "points": subseg,
+                    "area": round(area, 4),
+                    "perimeter": round(perimeter, 4),
+                    "hydraulic_radius": round(r_h, 4),
+                    "velocity": round(velocity, 4),
+                    "flow": round(flow, 4),
+                })
+                idx += 1
         return info
+
+    def get_subsections_summary(self):
+        """
+        Get flow summary by subsection (LOB, Channel, ROB).
+
+        Returns:
+            dict: Summary with area, flow, and percentage for each subsection
+        """
+        segments = self._find_wet_segments()
+        summary = {'LOB': {'area': 0, 'flow': 0},
+                   'Channel': {'area': 0, 'flow': 0},
+                   'ROB': {'area': 0, 'flow': 0}}
+
+        for seg in segments:
+            subsegments = self._split_segment_by_boundaries(seg)
+            for subsection, subseg in subsegments:
+                area = self._segment_area(subseg)
+                n = self._get_roughness_for_subsection(subsection)
+                flow = self._subsegment_flow(subseg, n)
+                summary[subsection]['area'] += area
+                summary[subsection]['flow'] += flow
+
+        total_flow = sum(s['flow'] for s in summary.values())
+        total_area = sum(s['area'] for s in summary.values())
+
+        for key in summary:
+            summary[key]['area'] = round(summary[key]['area'], 4)
+            summary[key]['flow'] = round(summary[key]['flow'], 4)
+            summary[key]['flow_pct'] = round(100 * summary[key]['flow'] / total_flow, 1) if total_flow > 0 else 0
+            summary[key]['area_pct'] = round(100 * summary[key]['area'] / total_area, 1) if total_area > 0 else 0
+
+        return summary
 
     def calculate_flow_rates(self, step=0.1):
         """
@@ -614,6 +770,12 @@ def plot_channel(channel, title=None):
                          where=[e <= water_level for e in water_fill_elevations],
                          color='steelblue', alpha=0.5, label='Water')
         ax1.axhline(y=water_level, color='blue', linestyle='--', linewidth=1.5, label=f'Water level: {water_level:.2f} m')
+
+        # Draw LOB/ROB boundaries if defined
+        if hasattr(channel, 'lob_station') and channel.lob_station is not None:
+            ax1.axvline(x=channel.lob_station, color='green', linestyle=':', linewidth=2, label=f'LOB: {channel.lob_station}')
+        if hasattr(channel, 'rob_station') and channel.rob_station is not None:
+            ax1.axvline(x=channel.rob_station, color='orange', linestyle=':', linewidth=2, label=f'ROB: {channel.rob_station}')
     else:
         # For other channels - fill from bottom to depth
         ax1.axhline(y=water_level, color='blue', linestyle='--', linewidth=1.5, label=f'Depth: {water_level:.2f} m')
@@ -621,7 +783,7 @@ def plot_channel(channel, title=None):
     ax1.set_xlabel('Station [m]')
     ax1.set_ylabel('Elevation [m]')
     ax1.set_title('Cross-section')
-    ax1.legend(loc='upper right')
+    ax1.legend(loc='upper right', fontsize='small')
 
     # Plot 2: Flow rate curve
     flow_rates = channel.calculate_flow_rates()
@@ -662,4 +824,4 @@ def plot_channel(channel, title=None):
         fig.suptitle(title, fontsize=14, fontweight='bold')
 
     plt.tight_layout()
-    # return fig
+    return fig
