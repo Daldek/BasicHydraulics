@@ -12,6 +12,10 @@ class Structure:
         fluid_density (float): The density of the fluid in kg/m³ (default is water at 1000 kg/m³).
         dimension (float or list): The size of the opening, either as a single value for circular
                                    openings or a list of two values for rectangular openings.
+
+    Methods:
+        opening_area(): Calculate the area of the opening.
+        get_opening_profile(): Return a dictionary describing the opening geometry.
     """
 
     def __init__(self, hydraulic_head=None, fluid_density=1000, dimension=None):
@@ -57,11 +61,44 @@ class Structure:
                 )
         return self._opening_area
 
+    def get_opening_profile(self):
+        """
+        Return a dictionary describing the opening geometry.
+
+        Returns:
+            dict: Opening profile with type, dimensions, and area.
+                  For circular: {'type': 'circular', 'diameter': float, 'area': float}
+                  For rectangular: {'type': 'rectangular', 'width': float, 'height': float, 'area': float}
+        """
+        if isinstance(self.dimension, (int, float)):
+            return {
+                'type': 'circular',
+                'diameter': self.dimension,
+                'area': self.opening_area()
+            }
+        elif isinstance(self.dimension, list) and len(self.dimension) == 1:
+            return {
+                'type': 'circular',
+                'diameter': self.dimension[0],
+                'area': self.opening_area()
+            }
+        elif isinstance(self.dimension, list) and len(self.dimension) == 2:
+            return {
+                'type': 'rectangular',
+                'width': self.dimension[0],
+                'height': self.dimension[1],
+                'area': self.opening_area()
+            }
+        else:
+            raise ValueError(
+                "Dimension must be a single float/int or a list of one or two floats/ints."
+            )
+
 
 class SmallOpening(Structure):
     """
     Class representing a small, non-submerged opening in a structure, such as a hole or orifice.
-    Uses the inherited method `opening_area` from the Structure class.
+    Uses Torricelli's law for orifice flow calculations.
 
     Attributes:
         dimension (float or list): The size of the opening, either as a single value for circular
@@ -69,9 +106,14 @@ class SmallOpening(Structure):
         hydraulic_head (float): The hydraulic head influencing the flow through the opening.
         velocity_coef (float): Coefficient representing the effect of velocity, typically 0.98.
         contraction_coef (float): Coefficient representing the effect of contraction, typically 0.64.
-        _opening_area (float): Cached value of the calculated opening area (internal use).
-        _velocity (float): Cached value of the calculated fluid velocity through the opening (internal use).
-        _flow (float): Cached value of the calculated flow rate through the opening (internal use).
+
+    Methods:
+        pressure_at_opening(): Calculate pressure at the opening.
+        velocity(): Calculate fluid velocity using Torricelli's law.
+        flow(): Calculate flow rate through the opening.
+        time_to_discharge(surface_area): Calculate time to discharge fluid.
+        flow_duration_for_volume(volume): Calculate time to discharge specific volume.
+        calculate_flow_curves(head_min, head_max, step): Generate flow rate curve Q(h).
     """
 
     def __init__(
@@ -174,10 +216,49 @@ class SmallOpening(Structure):
         time = volume / self.flow()
         return time
 
+    def calculate_flow_curves(self, head_min=0.0, head_max=10.0, step=0.1):
+        """
+        Generate a mapping of hydraulic head to flow rate.
+
+        Iterates through hydraulic head values from head_min to head_max,
+        calculating the flow rate at each step. Compatible with the
+        calculate_flow_rates() method in channel.py.
+
+        Args:
+            head_min (float): Minimum hydraulic head in meters. Defaults to 0.0.
+            head_max (float): Maximum hydraulic head in meters. Defaults to 10.0.
+            step (float): Increment step for hydraulic head. Defaults to 0.1.
+
+        Returns:
+            dict: Mapping of hydraulic head (float) to flow rate (float),
+                  with values rounded to 4 decimal places.
+        """
+        original_head = self.hydraulic_head
+        flow_curves = {}
+        head = head_min
+
+        while head <= head_max + step / 2:  # Add tolerance for floating point
+            rounded_head = round(head, 2)
+            if rounded_head == 0.0:
+                flow_curves[0.0] = 0.0
+            else:
+                self.hydraulic_head = rounded_head
+                self._velocity = None
+                self._flow = None
+                flow_curves[rounded_head] = round(self.flow(), 4)
+            head += step
+
+        self.hydraulic_head = original_head
+        self._velocity = None
+        self._flow = None
+
+        return flow_curves
+
 
 class LargeOpening(Structure):
     """
-    Class representing steady flow through a large, non-submerged opening (free discharge).
+    Class representing steady flow through a large opening.
+    Accounts for varying head across opening height using Boussinesq formula.
 
     Attributes:
         dimension (float or list): The size of the opening, either as a single value for circular
@@ -185,6 +266,12 @@ class LargeOpening(Structure):
         hydraulic_head (float): The hydraulic head influencing the flow through the opening.
         fluid_density (float): The density of the fluid in kg/m³.
         discharge_coef (float): The discharge coefficient for the opening (typically between 0.6 and 1).
+
+    Methods:
+        free_flow(): Calculate flow rate for unsubmerged discharge.
+        submerged_flow(height_difference): Calculate flow rate for fully submerged opening.
+        partially_submerged_flow(h1, h2, h3): Calculate flow rate for mixed conditions.
+        calculate_flow_curves(head_min, head_max, step, flow_type): Generate flow rate curves Q(h).
     """
 
     def __init__(
@@ -308,3 +395,133 @@ class LargeOpening(Structure):
             self.discharge_coef * self.dimension[0] * h3 * math.sqrt(2 * g * (h1 + h2))
         )
         return flow_rate
+
+    def calculate_flow_curves(self, head_min=0.0, head_max=10.0, step=0.1, flow_type='free'):
+        """
+        Generate a mapping of hydraulic head to flow rate.
+
+        Iterates through hydraulic head values from head_min to head_max,
+        calculating the flow rate at each step. Compatible with the
+        calculate_flow_rates() method in channel.py.
+
+        Note: For free flow, head must be >= half the opening height to avoid
+        negative values under the square root. Points below this threshold
+        return 0.0.
+
+        Args:
+            head_min (float): Minimum hydraulic head in meters. Defaults to 0.0.
+            head_max (float): Maximum hydraulic head in meters. Defaults to 10.0.
+            step (float): Increment step for hydraulic head. Defaults to 0.1.
+            flow_type (str): Type of flow calculation. Options:
+                - 'free': Free discharge flow (default)
+                - 'submerged': Submerged flow (uses head as height_difference)
+                - 'all': Returns both flow types in nested dict
+
+        Returns:
+            dict: For 'free' or 'submerged': mapping of hydraulic head (float)
+                  to flow rate (float), with values rounded to 4 decimal places.
+                  For 'all': {'free': {...}, 'submerged': {...}}
+        """
+        original_head = self.hydraulic_head
+        flow_curves = {}
+        head = head_min
+
+        # Determine minimum head for free flow (head must be >= half opening height)
+        if isinstance(self.dimension, (int, float)):
+            min_free_head = self.dimension / 2
+        elif isinstance(self.dimension, list) and len(self.dimension) == 1:
+            min_free_head = self.dimension[0] / 2
+        elif isinstance(self.dimension, list) and len(self.dimension) == 2:
+            min_free_head = self.dimension[1] / 2  # height
+        else:
+            min_free_head = 0
+
+        if flow_type == 'all':
+            free_curves = {}
+            submerged_curves = {}
+            while head <= head_max + step / 2:
+                rounded_head = round(head, 2)
+                if rounded_head == 0.0:
+                    free_curves[0.0] = 0.0
+                    submerged_curves[0.0] = 0.0
+                else:
+                    self.hydraulic_head = rounded_head
+                    # Calculate free flow (0.0 if head below threshold)
+                    if rounded_head >= min_free_head:
+                        free_curves[rounded_head] = round(self.free_flow(), 4)
+                    else:
+                        free_curves[rounded_head] = 0.0
+                    submerged_curves[rounded_head] = round(self.submerged_flow(rounded_head), 4)
+                head += step
+            self.hydraulic_head = original_head
+            return {'free': free_curves, 'submerged': submerged_curves}
+
+        while head <= head_max + step / 2:
+            rounded_head = round(head, 2)
+            if rounded_head == 0.0:
+                flow_curves[0.0] = 0.0
+            else:
+                self.hydraulic_head = rounded_head
+                if flow_type == 'submerged':
+                    flow_curves[rounded_head] = round(self.submerged_flow(rounded_head), 4)
+                else:  # 'free' or default
+                    # Return 0.0 if head below threshold for free flow
+                    if rounded_head >= min_free_head:
+                        flow_curves[rounded_head] = round(self.free_flow(), 4)
+                    else:
+                        flow_curves[rounded_head] = 0.0
+            head += step
+
+        self.hydraulic_head = original_head
+        return flow_curves
+
+
+def plot_structure(structure, head_max=None, title=None):
+    """
+    Visualize flow rate curve for a structure.
+
+    Args:
+        structure: Structure object (SmallOpening or LargeOpening)
+        head_max: Maximum hydraulic head for flow curve. Defaults to 2x current head.
+        title: Optional title for the plot
+
+    Returns:
+        matplotlib Figure object
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    sns.set_theme(style="whitegrid")
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    hydraulic_head = structure.hydraulic_head or 1.0
+
+    # Generate flow curve
+    if head_max is None:
+        head_max = max(hydraulic_head * 2, 1.0)
+
+    flow_curves = structure.calculate_flow_curves(head_max=head_max, step=0.1)
+    heads = list(flow_curves.keys())
+    flows = list(flow_curves.values())
+
+    sns.lineplot(x=flows, y=heads, ax=ax, marker='o', markersize=4)
+    ax.set_xlabel('Flow rate [m³/s]')
+    ax.set_ylabel('Hydraulic head [m]')
+
+    # Mark current operating point
+    if isinstance(structure, SmallOpening):
+        current_flow = structure.flow()
+    else:  # LargeOpening
+        current_flow = structure.free_flow()
+
+    ax.scatter([current_flow], [hydraulic_head], color='red', s=100, zorder=5)
+    ax.annotate(f'Q={current_flow:.3f} m³/s',
+                (current_flow, hydraulic_head),
+                textcoords="offset points", xytext=(10, 10), color='red')
+
+    ax.set_title(title or 'Flow rate curve')
+    ax.set_xlim(left=0)
+    ax.set_ylim(bottom=0)
+
+    fig.tight_layout()
+    return fig
