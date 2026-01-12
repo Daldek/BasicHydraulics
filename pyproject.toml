@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "basichydraulics"
+version = "0.1.0"
+description = "Toolkit for river channel and hydraulic structure capacity calculations"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Piotr de Bever"}
+]
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Hydrology",
+]
+keywords = ["hydraulics", "hydrology", "manning", "channel", "flow"]
+
+dependencies = [
+    "numpy",
+    "matplotlib",
+    "seaborn",
+]
+
+[project.optional-dependencies]
+gui = [
+    "streamlit",
+    "pandas",
+]
+dev = [
+    "pytest",
+    "pytest-cov",
+]
+
+[project.scripts]
+basichydraulics-gui = "basichydraulics.gui:main"
+
+[project.urls]
+Repository = "https://github.com/Daldek/BasicHydraulics"
+
+[tool.setuptools.packages.find]
+include = ["basichydraulics*"]

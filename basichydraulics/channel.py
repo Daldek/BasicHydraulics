@@ -823,5 +823,4 @@ def plot_channel(channel, title=None):
     if title:
         fig.suptitle(title, fontsize=14, fontweight='bold')
 
-    plt.tight_layout()
-    return fig
+    fig.tight_layout()

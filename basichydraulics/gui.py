@@ -17,7 +17,9 @@ Features:
     - Interactive visualization (cross-section + flow rate curve)
 
 Run with:
-    streamlit run gui_streamlit.py
+    basichydraulics-gui
+    # or
+    streamlit run -m basichydraulics.gui
 
 Opens in browser at http://localhost:8501
 """
@@ -26,7 +28,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from channel import (
+from basichydraulics.channel import (
     Flat, TriangularChannel, RectangularChannel,
     TrapezoidalChannel, SemiCircularChannel, IrregularChannel,
     plot_channel
@@ -293,3 +295,10 @@ else:
 # Footer
 st.markdown("---")
 st.caption("BasicHydraulics - Toolkit for river channel and structures capacity calculations")
+
+
+def main():
+    """Entry point for the GUI command."""
+    import sys
+    import subprocess
+    sys.exit(subprocess.call(["streamlit", "run", __file__]))

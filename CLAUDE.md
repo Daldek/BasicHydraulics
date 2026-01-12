@@ -10,10 +10,17 @@ Repository: https://github.com/Daldek/BasicHydraulics
 
 It implements the Manning formula for open channel flow and Torricelli's law for flow through openings.
 
-## Environment Setup
+## Installation
 
 ```bash
-source venv/bin/activate
+# Install in development mode
+pip install -e .
+
+# With GUI support
+pip install -e ".[gui]"
+
+# With development dependencies
+pip install -e ".[dev]"
 ```
 
 ## Running Examples
@@ -25,26 +32,28 @@ jupyter notebook Examples.ipynb
 ## Running GUI
 
 ```bash
-streamlit run gui_streamlit.py
+basichydraulics-gui
 ```
 
 Opens web-based interface at http://localhost:8501.
 
-### gui_streamlit.py - Web Interface
+## Project Structure
 
-Streamlit-based GUI providing:
-- Channel type dropdown selector
-- Dynamic parameter input fields (adapt to selected channel type)
-- Two-column station/elevation data entry for IrregularChannel
-- LOB/ROB boundary configuration with separate Manning's n coefficients
-- Results table: cross-sectional area, wetted perimeter, hydraulic radius, velocity, flow rate
-- Subsection analysis table (for IrregularChannel with LOB/ROB)
-- Flow rate curve as interactive dataframe
-- Visualization plot (cross-section + flow rate curve)
+```
+BasicHydraulics/
+    basichydraulics/           # Main package
+        __init__.py            # Package exports
+        channel.py             # Open channel flow
+        structure.py           # Flow through openings
+        gui.py                 # Streamlit GUI
+    tests/                     # Test suite
+    pyproject.toml             # Package configuration
+    Examples.ipynb             # Usage examples
+```
 
 ## Architecture
 
-### channel.py - Open Channel Flow
+### basichydraulics/channel.py - Open Channel Flow
 
 Base class `Channel` implements Manning formula calculations:
 - `hydraulic_radius()` - cross-sectional area / wetted perimeter
@@ -73,7 +82,7 @@ All channel classes have:
 - Flow rate curve with current point marked
 - Synchronized Y axes between both plots
 
-### structure.py - Flow Through Openings
+### basichydraulics/structure.py - Flow Through Openings
 
 Base class `Structure` handles opening geometry:
 - `dimension` accepts float (circular diameter) or list of 2 floats (rectangular width × height)
@@ -98,6 +107,18 @@ Base class `Structure` handles opening geometry:
 - Flow rate Q vs hydraulic head h
 - Current operating point marked in red
 - Curve starts from (0, 0)
+
+### basichydraulics/gui.py - Web Interface
+
+Streamlit-based GUI providing:
+- Channel type dropdown selector
+- Dynamic parameter input fields (adapt to selected channel type)
+- Two-column station/elevation data entry for IrregularChannel
+- LOB/ROB boundary configuration with separate Manning's n coefficients
+- Results table: cross-sectional area, wetted perimeter, hydraulic radius, velocity, flow rate
+- Subsection analysis table (for IrregularChannel with LOB/ROB)
+- Flow rate curve as interactive dataframe
+- Visualization plot (cross-section + flow rate curve)
 
 ## Key Constants
 
