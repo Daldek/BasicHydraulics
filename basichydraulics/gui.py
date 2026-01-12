@@ -300,5 +300,6 @@ st.caption("BasicHydraulics - Toolkit for river channel and structures capacity 
 def main():
     """Entry point for the GUI command."""
     import sys
-    import subprocess
-    sys.exit(subprocess.call(["streamlit", "run", __file__]))
+    from streamlit.web import cli as stcli
+    sys.argv = ["streamlit", "run", __file__]
+    stcli.main()
