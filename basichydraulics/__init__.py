@@ -1,4 +1,4 @@
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 from .channel import (
     Channel,
@@ -19,6 +19,14 @@ from .structure import (
     g,
 )
 
+from .culvert import (
+    Culvert,
+    CircularCulvert,
+    BoxCulvert,
+    PipeArchCulvert,
+    plot_culvert,
+)
+
 __all__ = [
     "Channel",
     "Flat",
@@ -33,4 +41,9 @@ __all__ = [
     "LargeOpening",
     "plot_structure",
     "g",
+    "Culvert",
+    "CircularCulvert",
+    "BoxCulvert",
+    "PipeArchCulvert",
+    "plot_culvert",
 ]

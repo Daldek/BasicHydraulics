@@ -33,6 +33,10 @@ from basichydraulics.channel import (
     TrapezoidalChannel, SemiCircularChannel, IrregularChannel,
     plot_channel
 )
+from basichydraulics.culvert import (
+    CircularCulvert, BoxCulvert, PipeArchCulvert,
+    plot_culvert
+)
 
 # Page configuration
 st.set_page_config(
@@ -291,6 +295,186 @@ if channel_type != "Select channel type...":
 
 else:
     st.info("Select a channel type to begin calculations")
+
+# =============================================================================
+# CULVERT CALCULATOR SECTION
+# =============================================================================
+
+st.markdown("---")
+st.title("Culvert Calculator")
+
+CULVERT_TYPES = [
+    "Select culvert type...",
+    "Circular (Pipe)",
+    "Box (Rectangular)",
+    "Pipe-Arch"
+]
+
+culvert_type = st.selectbox("Culvert Type", CULVERT_TYPES, key="culvert_selector")
+
+culvert = None
+
+if culvert_type != "Select culvert type...":
+
+    col_culvert_input, col_culvert_results = st.columns([1, 1.5])
+
+    with col_culvert_input:
+        st.subheader("Culvert Parameters")
+
+        # Downstream channel option
+        st.markdown("**Downstream Channel**")
+        use_channel_as_downstream = st.checkbox(
+            "Use channel from above as downstream",
+            value=False,
+            disabled=(channel is None),
+            help="Use the channel defined above to calculate tailwater iteratively"
+        )
+
+        outlet_offset = 0.0
+        if use_channel_as_downstream and channel is not None:
+            st.success(f"Using {channel_type} channel for tailwater calculation")
+            outlet_offset = st.number_input(
+                "Outlet invert offset [m]",
+                value=0.0,
+                step=0.1,
+                format="%.2f",
+                key="outlet_offset",
+                help="Elevation difference: outlet invert - channel bottom. "
+                     "Positive if outlet is above channel bottom."
+            )
+        elif use_channel_as_downstream and channel is None:
+            st.warning("Please define a channel above first")
+
+        st.markdown("---")
+
+        # Common parameters
+        length = st.number_input("Length [m]", value=30.0, min_value=0.1, step=1.0, key="culvert_length")
+        slope = st.number_input("Slope [m/m]", value=0.01, format="%.4f", step=0.001, key="culvert_slope")
+        roughness_n_culvert = st.number_input("Manning's n", value=0.024, format="%.4f", step=0.001, key="culvert_n")
+        headwater = st.number_input("Headwater [m]", value=2.0, min_value=0.0, step=0.1, key="culvert_hw")
+        tailwater = st.number_input("Tailwater [m]", value=0.5, min_value=0.0, step=0.1, key="culvert_tw")
+
+        # Determine downstream channel to use
+        downstream_ch = channel if use_channel_as_downstream and channel else None
+
+        if culvert_type == "Circular (Pipe)":
+            diameter = st.number_input("Diameter [m]", value=1.2, min_value=0.1, step=0.1, key="culvert_diameter")
+            inlet_options = list(CircularCulvert.INLET_COEFFICIENTS.keys())
+            inlet_type = st.selectbox("Inlet Type", inlet_options, key="culvert_inlet_circ")
+
+            culvert = CircularCulvert(
+                diameter=diameter,
+                length=length,
+                slope=slope,
+                inlet_type=inlet_type,
+                roughness_n=roughness_n_culvert,
+                headwater=headwater,
+                tailwater=tailwater,
+                downstream_channel=downstream_ch,
+                outlet_invert_offset=outlet_offset
+            )
+
+        elif culvert_type == "Box (Rectangular)":
+            width_box = st.number_input("Width [m]", value=2.0, min_value=0.1, step=0.1, key="culvert_width")
+            height_box = st.number_input("Height [m]", value=1.5, min_value=0.1, step=0.1, key="culvert_height")
+            inlet_options = list(BoxCulvert.INLET_COEFFICIENTS.keys())
+            inlet_type = st.selectbox("Inlet Type", inlet_options, key="culvert_inlet_box")
+
+            culvert = BoxCulvert(
+                width=width_box,
+                height=height_box,
+                length=length,
+                slope=slope,
+                inlet_type=inlet_type,
+                roughness_n=roughness_n_culvert,
+                headwater=headwater,
+                tailwater=tailwater,
+                downstream_channel=downstream_ch,
+                outlet_invert_offset=outlet_offset
+            )
+
+        elif culvert_type == "Pipe-Arch":
+            span = st.number_input("Span [m]", value=1.8, min_value=0.1, step=0.1, key="culvert_span")
+            rise = st.number_input("Rise [m]", value=1.2, min_value=0.1, step=0.1, key="culvert_rise")
+            inlet_options = list(PipeArchCulvert.INLET_COEFFICIENTS.keys())
+            inlet_type = st.selectbox("Inlet Type", inlet_options, key="culvert_inlet_arch")
+
+            culvert = PipeArchCulvert(
+                span_width=span,
+                rise_height=rise,
+                length=length,
+                slope=slope,
+                inlet_type=inlet_type,
+                roughness_n=roughness_n_culvert,
+                headwater=headwater,
+                tailwater=tailwater,
+                downstream_channel=downstream_ch,
+                outlet_invert_offset=outlet_offset
+            )
+
+    with col_culvert_results:
+        if culvert is not None:
+            st.subheader("Results")
+
+            Q, regime = culvert.controlling_flow()
+
+            # Build results table
+            params = [
+                "Discharge",
+                "Control Regime",
+                "Cross-sectional Area",
+                "Inlet Velocity",
+                "Outlet Velocity",
+                "Entrance Loss Coef (Ke)"
+            ]
+            values = [
+                f"{Q:.4f} m³/s",
+                regime.capitalize(),
+                f"{culvert.cross_sectional_area():.4f} m²",
+                f"{culvert.velocity_inlet():.3f} m/s",
+                f"{culvert.velocity_outlet():.3f} m/s",
+                f"{culvert.Ke:.3f}"
+            ]
+
+            # Add tailwater info if downstream channel is used
+            if culvert.downstream_channel is not None:
+                params.append("Calculated Tailwater")
+                values.append(f"{culvert.tailwater:.3f} m")
+
+            results_data_culvert = {"Parameter": params, "Value": values}
+            st.table(pd.DataFrame(results_data_culvert))
+
+            # Show warning if capacity exceeded
+            if culvert.downstream_channel is not None and culvert.tailwater_exceeded_capacity():
+                st.warning(
+                    "Discharge exceeds downstream channel capacity! "
+                    "Using maximum tailwater from channel rating curve."
+                )
+
+            # Rating curve table
+            st.markdown("**Rating Curve**")
+            rating = culvert.calculate_rating_curve(hw_max=headwater * 2, step=0.2)
+            rating_df = pd.DataFrame({
+                "HW [m]": rating['headwater'],
+                "Q [m³/s]": rating['discharge'],
+                "Regime": rating['regime']
+            })
+            st.dataframe(rating_df, hide_index=True)
+
+    # Culvert Visualization
+    if culvert is not None:
+        st.markdown("---")
+        st.subheader("Culvert Visualization")
+
+        try:
+            fig_culvert = plot_culvert(culvert, title=f"{culvert_type}")
+            st.pyplot(fig_culvert, clear_figure=True)
+            plt.close(fig_culvert)
+        except Exception as e:
+            st.error(f"Error creating culvert plot: {e}")
+
+else:
+    st.info("Select a culvert type to begin calculations")
 
 # Footer
 st.markdown("---")
